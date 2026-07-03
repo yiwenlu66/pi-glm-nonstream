@@ -1,0 +1,10 @@
+{
+  "name": "pi-glm-nonstream",
+  "version": "1.0.0",
+  "description": "Non-streaming GLM-5.2 provider for Pi — workaround for micuapi.ai proxy's broken streaming tool calls",
+  "license": "MIT",
+  "keywords": ["pi-package", "pi-extension", "glm", "glm-5.2", "provider"],
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}
