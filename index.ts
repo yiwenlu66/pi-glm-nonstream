@@ -408,36 +408,44 @@ export default function (pi: ExtensionAPI) {
   const config = loadModelsJson();
   if (!config?.providers) return;
 
-  for (const [name, provider] of Object.entries(config.providers) as [string, any][]) {
-    // Look for providers that have models with a "nonstream" compat flag
+  for (const [providerName, provider] of Object.entries(config.providers) as [string, any][]) {
     const models = provider.models;
     if (!Array.isArray(models)) continue;
+    if (!models.some((m: any) => m.compat?.nonstream === true)) continue;
 
-    const nonstreamModels = models.filter((m: any) => m.compat?.nonstream === true);
-    if (nonstreamModels.length === 0) continue;
+    const nonstreamApi = `${providerName}-nonstream`;
 
-    // Re-register the same provider with non-streaming streamSimple.
-    // Models without the nonstream flag keep their original api; flagged
-    // models get a shadow entry with api set to the provider name so
-    // streamSimple is dispatched.
-    const allModels = models.map((m: any) => {
-      if (m.compat?.nonstream) {
-        const { nonstream, ...rest } = m.compat;
-        return {
-          ...m,
-          name: `${m.name || m.id} (non-stream)`,
-          api: `${name}-nonstream`,
-          compat: Object.keys(rest).length > 0 ? rest : undefined,
-        };
-      }
-      return m;
+    // Re-register the SAME provider name. Pi replaces the provider's model list.
+    // Models marked compat.nonstream=true get routed to this extension's custom
+    // API. Unmarked models keep their original API, so mixed providers still work.
+    const rewrittenModels = models.map((m: any) => {
+      const isNonstream = m.compat?.nonstream === true;
+      const { nonstream, ...compatWithoutMarker } = m.compat || {};
+      const cleanedCompat = Object.keys(compatWithoutMarker).length > 0 ? compatWithoutMarker : undefined;
+
+      return {
+        id: m.id,
+        name: m.name || m.id,
+        api: isNonstream ? nonstreamApi : (m.api || provider.api),
+        baseUrl: m.baseUrl,
+        reasoning: m.reasoning ?? false,
+        thinkingLevelMap: m.thinkingLevelMap,
+        input: m.input || ["text"],
+        cost: m.cost || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: m.contextWindow || 128000,
+        maxTokens: m.maxTokens || 16384,
+        headers: m.headers,
+        compat: cleanedCompat,
+      };
     });
 
-    pi.registerProvider(`${name}-nonstream`, {
+    pi.registerProvider(providerName, {
       baseUrl: provider.baseUrl,
       apiKey: provider.apiKey,
-      api: `${name}-nonstream`,
-      models: allModels.filter((m: any) => m.api === `${name}-nonstream`),
+      api: nonstreamApi,
+      headers: provider.headers,
+      authHeader: provider.authHeader,
+      models: rewrittenModels,
       streamSimple: streamGLMNonstreaming,
     });
   }

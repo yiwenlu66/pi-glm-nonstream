@@ -1,8 +1,8 @@
 # pi-glm-nonstream
 
-Non-streaming provider for GLM-5.2 (or any model) on [Pi](https://pi.dev).
+Non-streaming model-registry opt-in for [Pi](https://pi.dev).
 
-Adds a `"nonstream": true` compat flag to `models.json`. When the extension loads, it reads your model registry and creates a non-streaming variant that uses `stream: false` requests. No env vars, no hard-coded provider names, no separate config.
+Add `"nonstream": true` to a model's `compat` in `models.json`. The extension re-registers that provider **in place** so the original model reference (for example `occ-glm/glm-5.2`) uses `stream: false` requests while keeping the same provider name, model ID, base URL, API key, context window, and thinking settings.
 
 ## Install
 
@@ -18,7 +18,7 @@ pi install yiwenlu66/pi-glm-nonstream
 
 ## Usage
 
-Add `"nonstream": true` to any model's `compat` in `models.json`:
+Mark the model in `~/.pi/agent/models.json`:
 
 ```json
 {
@@ -44,24 +44,34 @@ Add `"nonstream": true` to any model's `compat` in `models.json`:
 }
 ```
 
-Then select the non-streaming variant:
+Then use the original model reference:
 
 ```bash
-pi --model occ-glm-nonstream/glm-5.2
+pi --model occ-glm/glm-5.2
 ```
 
-The extension auto-discovers any provider whose models have `compat.nonstream: true` and registers a `<provider>-nonstream` shadow with the same config. The original streaming provider is unaffected.
+No shadow provider needs to be selected.
 
 ## Why
 
-Some proxies emit broken streaming tool-call deltas (argument chunks arrive at new indices without ID carry-over). Non-streaming responses are always correctly structured. The original issue was with GLM-5.2 through micuapi.ai.
+Some OpenAI-compatible proxies emit broken streaming tool-call deltas for GLM-5.2: argument chunks arrive at new indices without ID/name carry-over, so Pi's normal streaming parser treats one tool call as several malformed tool calls. Non-streaming responses return the complete `tool_calls` object and are structurally correct.
 
-## How it works
+## Mechanism
 
-1. Reads your `~/.pi/agent/models.json` at load time
-2. Finds providers whose models have `"nonstream": true` in `compat`
-3. Registers a shadow `<provider>-nonstream` with a custom `streamSimple`
-4. The `streamSimple` sends `stream: false` requests and converts the single-shot response to Pi's event stream
+At load time, the extension:
+
+1. Reads `~/.pi/agent/models.json`
+2. Finds providers with models marked `compat.nonstream: true`
+3. Re-registers the same provider name with the same models
+4. Routes only flagged models to a custom `streamSimple` implementation
+5. Sends `stream: false` to `/chat/completions`
+6. Converts the single-shot response to Pi's `AssistantMessageEventStream`
+
+Unflagged models in the same provider keep their original API.
+
+## Verified
+
+Verified with `occ-glm/glm-5.2`: a `bash` tool call (`ls -la`) executed correctly, returned output, and the model summarized it without malformed tool fragments.
 
 ## License
 
