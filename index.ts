@@ -1,15 +1,11 @@
 /**
  * GLM-5.2 Non-Streaming Provider Extension
  *
- * Wraps the OpenAI-compatible Chat Completions API with stream: false,
+ * Wraps an OpenAI-compatible Chat Completions API with stream: false,
  * converting the single-shot response into Pi's AssistantMessageEventStream.
  *
- * This sidesteps the micuapi.ai proxy's broken streaming tool-call assembly
- * (argument chunks arrive at new indices without ID carry-over).
- *
- * Usage:
- *   Load automatically from ~/.pi/agent/extensions/glm-nonstream/
- *   Then /model → occ-glm-nonstream/glm-5.2
+ * Configuration via environment variables (see README).
+ * Defaults work with micuapi.ai out of the box.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -386,20 +382,29 @@ function streamGLMNonstreaming(
 // Extension entry
 // ---------------------------------------------------------------------------
 
+// All configuration via environment variables. Nothing hard-coded.
+const PROVIDER_NAME = process.env.GLM_NONSTREAM_PROVIDER || "glm-nonstream";
+const BASE_URL = process.env.GLM_NONSTREAM_BASE_URL || "https://www.micuapi.ai/v1";
+const API_KEY = process.env.GLM_NONSTREAM_API_KEY || "$OCC_API_KEY";
+const MODEL_ID = process.env.GLM_NONSTREAM_MODEL || "glm-5.2";
+const MODEL_NAME = process.env.GLM_NONSTREAM_MODEL_NAME || `GLM-5.2 (non-stream)`;
+const CONTEXT_WINDOW = parseInt(process.env.GLM_NONSTREAM_CONTEXT || "1000000", 10);
+const MAX_TOKENS = parseInt(process.env.GLM_NONSTREAM_MAX_TOKENS || "131072", 10);
+
 export default function (pi: ExtensionAPI) {
-  pi.registerProvider("occ-glm-nonstream", {
-    baseUrl: "https://www.micuapi.ai/v1",
-    apiKey: "$OCC_API_KEY",
-    api: "occ-glm-nonstream",
+  pi.registerProvider(PROVIDER_NAME, {
+    baseUrl: BASE_URL,
+    apiKey: API_KEY,
+    api: PROVIDER_NAME,
     models: [
       {
-        id: "glm-5.2",
-        name: "GLM-5.2 (non-stream)",
+        id: MODEL_ID,
+        name: MODEL_NAME,
         reasoning: true,
-        input: ["text"],
+        input: ["text"] as const,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 1_000_000,
-        maxTokens: 131_072,
+        contextWindow: CONTEXT_WINDOW,
+        maxTokens: MAX_TOKENS,
         thinkingLevelMap: {
           minimal: null,
           low: null,
