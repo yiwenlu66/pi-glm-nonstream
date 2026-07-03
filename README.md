@@ -1,10 +1,8 @@
 # pi-glm-nonstream
 
-Non-streaming provider extension for GLM-5.2 (or any OpenAI-compatible model) on [Pi](https://pi.dev). Works around broken streaming tool-call assembly by using `stream: false` requests and converting responses to Pi's event stream.
+Non-streaming provider for GLM-5.2 (or any model) on [Pi](https://pi.dev).
 
-## Why
-
-Some proxies (e.g. micuapi.ai) emit malformed streaming tool-call deltas — argument chunks arrive at new indices without ID carry-over, splitting one tool call into multiple bogus calls. Non-streaming responses are always correctly structured.
+Adds a `"nonstream": true` compat flag to `models.json`. When the extension loads, it reads your model registry and creates a non-streaming variant that uses `stream: false` requests. No env vars, no hard-coded provider names, no separate config.
 
 ## Install
 
@@ -18,61 +16,52 @@ Or:
 pi install yiwenlu66/pi-glm-nonstream
 ```
 
-## Configuration
-
-All via environment variables. Defaults target micuapi.ai with GLM-5.2.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GLM_NONSTREAM_PROVIDER` | `glm-nonstream` | Provider name in Pi |
-| `GLM_NONSTREAM_BASE_URL` | `https://www.micuapi.ai/v1` | API base URL |
-| `GLM_NONSTREAM_API_KEY` | `$OCC_API_KEY` | API key (supports Pi's `$VAR` and `!cmd` syntax) |
-| `GLM_NONSTREAM_MODEL` | `glm-5.2` | Model ID sent to API |
-| `GLM_NONSTREAM_MODEL_NAME` | `GLM-5.2 (non-stream)` | Display name in Pi |
-| `GLM_NONSTREAM_CONTEXT` | `1000000` | Context window size |
-| `GLM_NONSTREAM_MAX_TOKENS` | `131072` | Max output tokens |
-
-### Examples
-
-**Default (micuapi.ai + GLM-5.2):**
-```bash
-OCC_API_KEY=sk-... pi --model glm-nonstream/glm-5.2
-```
-
-**Different endpoint:**
-```bash
-GLM_NONSTREAM_BASE_URL=https://api.z.ai/api/coding/paas/v4 \
-GLM_NONSTREAM_API_KEY='$ZAI_API_KEY' \
-GLM_NONSTREAM_MODEL=glm-5.2 \
-pi --model glm-nonstream/glm-5.2
-```
-
-**Any OpenAI-compatible model:**
-```bash
-GLM_NONSTREAM_BASE_URL=https://api.deepseek.com \
-GLM_NONSTREAM_API_KEY='$DEEPSEEK_API_KEY' \
-GLM_NONSTREAM_MODEL=deepseek-chat \
-GLM_NONSTREAM_MODEL_NAME='DeepSeek V3 (non-stream)' \
-GLM_NONSTREAM_CONTEXT=65536 \
-GLM_NONSTREAM_MAX_TOKENS=8192 \
-pi --model glm-nonstream/deepseek-chat
-```
-
 ## Usage
 
-```bash
-pi --model glm-nonstream/glm-5.2
+Add `"nonstream": true` to any model's `compat` in `models.json`:
+
+```json
+{
+  "providers": {
+    "occ-glm": {
+      "baseUrl": "https://www.micuapi.ai/v1",
+      "apiKey": "$OCC_API_KEY",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "glm-5.2",
+          "reasoning": true,
+          "contextWindow": 1000000,
+          "maxTokens": 131072,
+          "compat": {
+            "thinkingFormat": "zai",
+            "nonstream": true
+          }
+        }
+      ]
+    }
+  }
+}
 ```
 
-Or `/model` → `glm-nonstream/glm-5.2`.
+Then select the non-streaming variant:
+
+```bash
+pi --model occ-glm-nonstream/glm-5.2
+```
+
+The extension auto-discovers any provider whose models have `compat.nonstream: true` and registers a `<provider>-nonstream` shadow with the same config. The original streaming provider is unaffected.
+
+## Why
+
+Some proxies emit broken streaming tool-call deltas (argument chunks arrive at new indices without ID carry-over). Non-streaming responses are always correctly structured. The original issue was with GLM-5.2 through micuapi.ai.
 
 ## How it works
 
-1. Registers a custom provider via Pi's `streamSimple` extension API
-2. Converts Pi's internal message format to OpenAI Chat Completions format
-3. Sends `POST /chat/completions` with `stream: false`
-4. Parses the complete response (text, thinking, tool calls)
-5. Emits structured `AssistantMessageEventStream` events
+1. Reads your `~/.pi/agent/models.json` at load time
+2. Finds providers whose models have `"nonstream": true` in `compat`
+3. Registers a shadow `<provider>-nonstream` with a custom `streamSimple`
+4. The `streamSimple` sends `stream: false` requests and converts the single-shot response to Pi's event stream
 
 ## License
 

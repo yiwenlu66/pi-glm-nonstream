@@ -272,7 +272,9 @@ function streamGLMNonstreaming(
         output.usage.input = data.usage.prompt_tokens || 0;
         output.usage.output = data.usage.completion_tokens || 0;
         output.usage.totalTokens = data.usage.total_tokens || 0;
-        calculateCost(model, output.usage);
+        if (model.cost) {
+          calculateCost(model, output.usage);
+        }
       }
 
       const choice = data.choices?.[0];
@@ -380,40 +382,63 @@ function streamGLMNonstreaming(
 
 // ---------------------------------------------------------------------------
 // Extension entry
+//
+// Reads the configured GLM provider from models.json and re-registers it
+// with a non-streaming streamSimple. No env vars, no hard-coded defaults.
+// The user's models.json is the single source of truth.
 // ---------------------------------------------------------------------------
 
-// All configuration via environment variables. Nothing hard-coded.
-const PROVIDER_NAME = process.env.GLM_NONSTREAM_PROVIDER || "glm-nonstream";
-const BASE_URL = process.env.GLM_NONSTREAM_BASE_URL || "https://www.micuapi.ai/v1";
-const API_KEY = process.env.GLM_NONSTREAM_API_KEY || "$OCC_API_KEY";
-const MODEL_ID = process.env.GLM_NONSTREAM_MODEL || "glm-5.2";
-const MODEL_NAME = process.env.GLM_NONSTREAM_MODEL_NAME || `GLM-5.2 (non-stream)`;
-const CONTEXT_WINDOW = parseInt(process.env.GLM_NONSTREAM_CONTEXT || "1000000", 10);
-const MAX_TOKENS = parseInt(process.env.GLM_NONSTREAM_MAX_TOKENS || "131072", 10);
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
+
+function loadModelsJson(): Record<string, any> | null {
+  const paths = [
+    join(homedir(), ".pi", "agent", "models.json"),
+  ];
+  for (const p of paths) {
+    try {
+      return JSON.parse(readFileSync(p, "utf-8"));
+    } catch {}
+  }
+  return null;
+}
 
 export default function (pi: ExtensionAPI) {
-  pi.registerProvider(PROVIDER_NAME, {
-    baseUrl: BASE_URL,
-    apiKey: API_KEY,
-    api: PROVIDER_NAME,
-    models: [
-      {
-        id: MODEL_ID,
-        name: MODEL_NAME,
-        reasoning: true,
-        input: ["text"] as const,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: CONTEXT_WINDOW,
-        maxTokens: MAX_TOKENS,
-        thinkingLevelMap: {
-          minimal: null,
-          low: null,
-          medium: null,
-          high: "high",
-          xhigh: "max",
-        },
-      },
-    ],
-    streamSimple: streamGLMNonstreaming,
-  });
+  const config = loadModelsJson();
+  if (!config?.providers) return;
+
+  for (const [name, provider] of Object.entries(config.providers) as [string, any][]) {
+    // Look for providers that have models with a "nonstream" compat flag
+    const models = provider.models;
+    if (!Array.isArray(models)) continue;
+
+    const nonstreamModels = models.filter((m: any) => m.compat?.nonstream === true);
+    if (nonstreamModels.length === 0) continue;
+
+    // Re-register the same provider with non-streaming streamSimple.
+    // Models without the nonstream flag keep their original api; flagged
+    // models get a shadow entry with api set to the provider name so
+    // streamSimple is dispatched.
+    const allModels = models.map((m: any) => {
+      if (m.compat?.nonstream) {
+        const { nonstream, ...rest } = m.compat;
+        return {
+          ...m,
+          name: `${m.name || m.id} (non-stream)`,
+          api: `${name}-nonstream`,
+          compat: Object.keys(rest).length > 0 ? rest : undefined,
+        };
+      }
+      return m;
+    });
+
+    pi.registerProvider(`${name}-nonstream`, {
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey,
+      api: `${name}-nonstream`,
+      models: allModels.filter((m: any) => m.api === `${name}-nonstream`),
+      streamSimple: streamGLMNonstreaming,
+    });
+  }
 }
